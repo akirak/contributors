@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -14,16 +16,43 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
+type Config struct {
+	Root string
+}
+
+func makeAbsolute(pathArg string) (string, error) {
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		return pathArg, fmt.Errorf("Error from Getwd: %v", cwdErr)
+	}
+
+	if path.IsAbs(pathArg) {
+		return pathArg, nil
+	} else {
+		return path.Join(cwd, pathArg), nil
+	}
+}
+
+func verifyConfig(config *Config) error {
+	rootInfo, rootErr := os.Stat(config.Root)
+	if rootErr != nil {
+		return fmt.Errorf("Root error: %v", rootErr)
+	} else if !rootInfo.IsDir() {
+		return fmt.Errorf("Root error: %s is not a directory", config.Root)
+	}
+	return nil
+}
+
 type RepoContents map[string][]string
 
-func RunLinguist(root string) (RepoContents, error) {
+func runLinguist(root string) (RepoContents, error) {
 	cmd := exec.Command("linguist", root, "--json")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 
 	if err != nil {
-		return nil, err
+		return nil, errors.New("Linguist failed")
 	}
 
 	var result RepoContents
@@ -58,14 +87,14 @@ func (a LanguageStats) Len() int           { return len(a) }
 func (a LanguageStats) Less(i, j int) bool { return a[i].TotalLines > a[j].TotalLines }
 func (a LanguageStats) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func GetContributions(commit *object.Commit, files []string) ([]Contribution, int, error) {
+func getContributions(commit *object.Commit, files []string) ([]Contribution, int, error) {
 	m := make(map[string]int)
 	var totalLines int
 	totalLines = 0
 	for i := range files {
 		blame, bErr := git.Blame(commit, files[i])
 		if bErr != nil {
-			return nil, 0, bErr
+			return nil, 0, fmt.Errorf("git-blame failed: %v", bErr)
 		}
 		for lineNum := range blame.Lines {
 			author := blame.Lines[lineNum].Author
@@ -91,29 +120,29 @@ func GetContributions(commit *object.Commit, files []string) ([]Contribution, in
 	return result, totalLines, nil
 }
 
-func GetStats(root string, contents RepoContents) ([]LanguageStat, error) {
+func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	var result []LanguageStat
 
 	repo, openErr := git.PlainOpen(root)
 	if openErr != nil {
-		return nil, openErr
+		return nil, fmt.Errorf("Failed to open the repository %s: %v", root, openErr)
 	}
 
 	ref, refErr := repo.Head()
 	if refErr != nil {
-		return nil, refErr
+		return nil, fmt.Errorf("Failed to read the head reference: %v", refErr)
 	}
 
 	commit, commitErr := repo.CommitObject(ref.Hash())
 
 	if commitErr != nil {
-		return nil, commitErr
+		return nil, fmt.Errorf("Failed to retrieve the commit: %v", commitErr)
 	}
 
 	for language, files := range contents {
-		contributions, totalLines, err := GetContributions(commit, files)
+		contributions, totalLines, err := getContributions(commit, files)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("Error while analysing %s: %v", language, err)
 		}
 		result = append(result, LanguageStat{
 			Language:      language,
@@ -126,19 +155,7 @@ func GetStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	return result, nil
 }
 
-func GenerateReport(root string, outDir string, outDirExists bool) error {
-	contents, err := RunLinguist(root)
-
-	if err != nil {
-		return err
-	}
-
-	stats, pError := GetStats(root, contents)
-
-	if pError != nil {
-		return pError
-	}
-
+func printResult(stats LanguageStats) {
 	for i := range stats {
 		fmt.Printf("Language: %s\n", stats[i].Language)
 		fmt.Printf("  Total lines: %d\n", stats[i].TotalLines)
@@ -153,14 +170,22 @@ func GenerateReport(root string, outDir string, outDirExists bool) error {
 		}
 		fmt.Println("---")
 	}
+}
 
-	if !outDirExists {
-		mkdirErr := os.Mkdir(outDir, 0755)
-		if mkdirErr != nil {
-			return mkdirErr
-		}
+func runApp(config Config) error {
+	contents, linguistError := runLinguist(config.Root)
+
+	if linguistError != nil {
+		return fmt.Errorf("Error: %v", linguistError)
 	}
 
+	stats, statsError := getStats(config.Root, contents)
+
+	if statsError != nil {
+		return fmt.Errorf("Error: %v", statsError)
+	}
+
+	printResult(stats)
 	return nil
 }
 
@@ -169,55 +194,44 @@ func main() {
 		Name:  "contributors",
 		Usage: "Analyse contributors of the project",
 		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:     "out-dir",
-				Aliases:  []string{"o"},
-				Usage:    "Save files to `DIR`",
-				Required: true,
-			},
-			&cli.BoolFlag{
-				Name:  "force",
-				Usage: "Allow overwriting files to out-dir",
-			},
+			// &cli.StringFlag{
+			// 	Name:     "out-dir",
+			// 	Aliases:  []string{"o"},
+			// 	Usage:    "Save files to `DIR`",
+			// 	Required: true,
+			// },
+			// &cli.BoolFlag{
+			// 	Name:  "force",
+			// 	Usage: "Allow overwriting files to out-dir",
+			// },
 		},
 		Action: func(c *cli.Context) error {
-
-			cwd, err := os.Getwd()
-			if err != nil {
-				return cli.Exit(err, 1)
-			}
-
-			var root string
+			config := Config{}
 			if c.NArg() > 0 {
-				root = path.Join(cwd, c.Args().First())
+				root, rootErr := makeAbsolute(c.Args().First())
+				if rootErr != nil {
+					return rootErr
+				}
+				config.Root = root
 			} else {
-				root = cwd
-			}
-			rootInfo, rootErr := os.Stat(root)
-			if rootErr != nil {
-				return cli.Exit(rootErr, 1)
-			} else if !rootInfo.IsDir() {
-				return cli.Exit(fmt.Sprintf("%s is not a directory", root), 1)
+				root, rootErr := os.Getwd()
+				if rootErr != nil {
+					return fmt.Errorf("Error from Getwd: %v", rootErr)
+				}
+				config.Root = root
 			}
 
-			outDir := path.Join(cwd, c.String("out-dir"))
-			outDirInfo, outDirErr := os.Stat(outDir)
-			if outDirErr == nil && !c.Bool("force") {
-				return cli.Exit(fmt.Sprintf("%s already exists and --force is not specified", outDir), 1)
-			}
-			if outDirErr == nil && !outDirInfo.IsDir() {
-				return cli.Exit(fmt.Sprintf("%s already exists", outDir), 1)
+			configError := verifyConfig(&config)
+			if configError != nil {
+				return configError
 			}
 
-			outDirExists := outDirErr != nil
-			runErr := GenerateReport(root, outDir, outDirExists)
-			if runErr != nil {
-				return cli.Exit(runErr, 1)
-			}
-
-			return nil
+			return runApp(config)
 		},
 	}
 
-	app.Run(os.Args)
+	err := app.Run(os.Args)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
