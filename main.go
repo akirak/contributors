@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -10,10 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"sort"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/urfave/cli/v2"
 )
 
@@ -89,27 +89,52 @@ func (a LanguageStats) Len() int           { return len(a) }
 func (a LanguageStats) Less(i, j int) bool { return a[i].TotalLines > a[j].TotalLines }
 func (a LanguageStats) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-func getContributions(commit *object.Commit, files []string) ([]Contribution, int, error) {
+func getContributions(root string, files []string) ([]Contribution, int, error) {
+	re, reErr := regexp.Compile(`^author-mail <(.+)>`)
+	if reErr != nil {
+		return nil, 0, fmt.Errorf("Regexp compile error: %v", reErr)
+	}
+
 	m := make(map[string]int)
 	var totalLines int
 	totalLines = 0
 	for i := range files {
 		file := files[i]
-		blame, bErr := git.Blame(commit, file)
-		if bErr != nil {
-			return nil, 0, fmt.Errorf("git-blame failed on %s: %v", file, bErr)
-		}
-		for lineNum := range blame.Lines {
-			author := blame.Lines[lineNum].Author
-			n, ok := m[author]
-			if !ok {
-				m[author] = 1
-			} else {
-				m[author] = n + 1
-			}
-			totalLines++
+		cmd := exec.Command("git", "blame", "--line-porcelain", "HEAD", "--", file)
+		cmd.Dir = root
+
+		stdout, pipeErr := cmd.StdoutPipe()
+		if pipeErr != nil {
+			return nil, 0, pipeErr
 		}
 
+		cmd.Start()
+
+		scanner := bufio.NewScanner(stdout)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			matched := re.MatchString(line)
+			if matched {
+				matches := re.FindStringSubmatch(line)
+				if len(matches) < 1 {
+					return nil, 0, fmt.Errorf("No submatch on %s", line)
+				}
+				author := matches[1]
+				n, ok := m[author]
+				if !ok {
+					m[author] = 1
+				} else {
+					m[author] = n + 1
+				}
+				totalLines++
+			}
+		}
+
+		scannerErr := scanner.Err()
+		if scannerErr != nil {
+			return nil, 0, fmt.Errorf("Error from scanner: %v", scannerErr)
+		}
 	}
 	var result []Contribution
 	for email, nlines := range m {
@@ -126,24 +151,8 @@ func getContributions(commit *object.Commit, files []string) ([]Contribution, in
 func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	var result []LanguageStat
 
-	repo, openErr := git.PlainOpen(root)
-	if openErr != nil {
-		return nil, fmt.Errorf("Failed to open the repository %s: %v", root, openErr)
-	}
-
-	ref, refErr := repo.Head()
-	if refErr != nil {
-		return nil, fmt.Errorf("Failed to read the head reference: %v", refErr)
-	}
-
-	commit, commitErr := repo.CommitObject(ref.Hash())
-
-	if commitErr != nil {
-		return nil, fmt.Errorf("Failed to retrieve the commit: %v", commitErr)
-	}
-
 	for language, files := range contents {
-		contributions, totalLines, err := getContributions(commit, files)
+		contributions, totalLines, err := getContributions(root, files)
 		if err != nil {
 			return nil, fmt.Errorf("Error while analysing %s: %v", language, err)
 		}
