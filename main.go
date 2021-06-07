@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -17,7 +18,8 @@ import (
 )
 
 type Config struct {
-	Root string
+	Root   string
+	Listen string
 }
 
 func makeAbsolute(pathArg string) (string, error) {
@@ -92,9 +94,10 @@ func getContributions(commit *object.Commit, files []string) ([]Contribution, in
 	var totalLines int
 	totalLines = 0
 	for i := range files {
-		blame, bErr := git.Blame(commit, files[i])
+		file := files[i]
+		blame, bErr := git.Blame(commit, file)
 		if bErr != nil {
-			return nil, 0, fmt.Errorf("git-blame failed: %v", bErr)
+			return nil, 0, fmt.Errorf("git-blame failed on %s: %v", file, bErr)
 		}
 		for lineNum := range blame.Lines {
 			author := blame.Lines[lineNum].Author
@@ -155,24 +158,9 @@ func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	return result, nil
 }
 
-func printResult(stats LanguageStats) {
-	for i := range stats {
-		fmt.Printf("Language: %s\n", stats[i].Language)
-		fmt.Printf("  Total lines: %d\n", stats[i].TotalLines)
-		// fmt.Println("  Files:")
-		// for j := range stats[i].Files {
-		// 	fmt.Println("  -", stats[i].Files[j])
-		// }
-		fmt.Println("  Contributors:")
-		for j := range stats[i].Contributions {
-			c := stats[i].Contributions[j]
-			fmt.Printf("  | %5.1f%% | %-30s | \n", c.Percentage, c.Email)
-		}
-		fmt.Println("---")
-	}
-}
-
 func runApp(config Config) error {
+	fmt.Printf("Analysing the repository %s...\n", config.Root)
+
 	contents, linguistError := runLinguist(config.Root)
 
 	if linguistError != nil {
@@ -185,8 +173,75 @@ func runApp(config Config) error {
 		return fmt.Errorf("Error: %v", statsError)
 	}
 
-	printResult(stats)
-	return nil
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, "<title>Contributors on %s</title>\n", config.Root)
+		fmt.Fprintf(w, "<h1>Contributors on %s</h1>\n", config.Root)
+
+		fmt.Fprintln(w, "<h2>Profile</h2>")
+
+		fmt.Fprintln(w, "<table>")
+		fmt.Fprintln(w, "<thead><tr>")
+		fmt.Fprint(w, "<th>Language</th>")
+		fmt.Fprint(w, "<th># of lines</th>")
+		fmt.Fprint(w, "<th>Percentage</th>")
+		fmt.Fprint(w, "</tr>")
+		fmt.Fprintln(w, "<tbody>")
+		var totalLines int = 0
+		for i := range stats {
+			totalLines += stats[i].TotalLines
+		}
+		for i := range stats {
+			stat := stats[i]
+			fmt.Fprintf(w, "<tr>")
+			fmt.Fprintf(w, "<td>%s</td>", stat.Language)
+			fmt.Fprintf(w, "<td>%d</td>", stat.TotalLines)
+			percentage := float64(stat.TotalLines) / float64(totalLines) * 100
+			fmt.Fprintf(w, "<td>%.2f%%</td>", percentage)
+			fmt.Fprintln(w, "</tr>")
+		}
+		fmt.Fprintln(w, "</tbody>")
+		fmt.Fprintln(w, "</table>")
+
+		fmt.Fprintln(w, "<h2>Contributions by language</h2>")
+		for i := range stats {
+			stat := stats[i]
+			fmt.Fprintf(w, "<h3>%s</h3>\n", stat.Language)
+
+			fmt.Fprintln(w, "<details>")
+			fmt.Fprintln(w, "<summary>Files</summary>")
+			fmt.Fprintln(w, "<ul>")
+			for j := range stat.Files {
+				fmt.Fprintf(w, "<li>%s</li>", stat.Files[j])
+			}
+			fmt.Fprintln(w, "</ul>")
+			fmt.Fprintln(w, "</details>")
+
+			fmt.Fprintln(w, "<table>")
+			fmt.Fprintln(w, "<caption>Contributors</caption>")
+			fmt.Fprintln(w, "<thead>")
+			fmt.Fprintln(w, "<tr>")
+			fmt.Fprintln(w, "<th>E-mail</th>")
+			fmt.Fprintln(w, "<th>Percent</th>")
+			fmt.Fprintln(w, "</tr>")
+			fmt.Fprintln(w, "</thead>")
+			fmt.Fprintln(w, "<tbody>")
+			for j := range stat.Contributions {
+				c := stat.Contributions[j]
+				fmt.Fprint(w, "<tr>")
+				fmt.Fprintf(w, "<td>%s</td>", c.Email)
+				fmt.Fprintf(w, "<td>%.1f%%</td>", c.Percentage)
+				fmt.Fprintln(w, "</tr>")
+			}
+			fmt.Fprintln(w, "</tbody>")
+			fmt.Fprintln(w, "</table>")
+
+		}
+	})
+
+	fmt.Printf("Listening on %s...\n", config.Listen)
+
+	return http.ListenAndServe(config.Listen, nil)
 }
 
 func main() {
@@ -194,16 +249,12 @@ func main() {
 		Name:  "contributors",
 		Usage: "Analyse contributors of the project",
 		Flags: []cli.Flag{
-			// &cli.StringFlag{
-			// 	Name:     "out-dir",
-			// 	Aliases:  []string{"o"},
-			// 	Usage:    "Save files to `DIR`",
-			// 	Required: true,
-			// },
-			// &cli.BoolFlag{
-			// 	Name:  "force",
-			// 	Usage: "Allow overwriting files to out-dir",
-			// },
+			&cli.IntFlag{
+				Name:    "port",
+				Aliases: []string{"p"},
+				Value:   8888,
+				Usage:   "Port number",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			config := Config{}
@@ -220,6 +271,7 @@ func main() {
 				}
 				config.Root = root
 			}
+			config.Listen = fmt.Sprintf(":%d", c.Int("port"))
 
 			configError := verifyConfig(&config)
 			if configError != nil {
