@@ -18,8 +18,9 @@ import (
 )
 
 type Config struct {
-	Root   string
-	Listen string
+	Root      string
+	Listen    string
+	Threshold int
 }
 
 func makeAbsolute(pathArg string) (string, error) {
@@ -239,16 +240,34 @@ func runApp(config Config) error {
 			fmt.Fprintln(w, "<thead>")
 			fmt.Fprintln(w, "<tr>")
 			fmt.Fprintln(w, "<th>E-mail</th>")
+			fmt.Fprintln(w, "<th>Lines</th>")
 			fmt.Fprintln(w, "<th>Percent</th>")
 			fmt.Fprintln(w, "</tr>")
 			fmt.Fprintln(w, "</thead>")
 			fmt.Fprintln(w, "<tbody>")
+			var remainingPercentage float64 = 100
+			var remainingContributors int = 0
 			for j := range stat.Contributions {
 				c := stat.Contributions[j]
 				identity, _ := stripDomain(c.Email)
+				percentage := c.Percentage
+				nlines := c.Nlines
+				if nlines < config.Threshold {
+					remainingContributors = len(stat.Contributions) - j
+					break
+				}
+				remainingPercentage -= percentage
 				fmt.Fprint(w, "<tr>")
 				fmt.Fprintf(w, "<td>%s</td>", identity)
-				fmt.Fprintf(w, "<td>%.1f%%</td>", c.Percentage)
+				fmt.Fprintf(w, "<td>%d</td>", nlines)
+				fmt.Fprintf(w, "<td>%.1f%%</td>", percentage)
+				fmt.Fprintln(w, "</tr>")
+			}
+			if remainingContributors > 0 {
+				fmt.Fprint(w, "<tr>")
+				fmt.Fprintf(w, "<td>%d others</td>", remainingContributors)
+				fmt.Fprint(w, "<td>-</td>")
+				fmt.Fprintf(w, "<td>%.1f%%</td>", remainingPercentage)
 				fmt.Fprintln(w, "</tr>")
 			}
 			fmt.Fprintln(w, "</tbody>")
@@ -273,6 +292,11 @@ func main() {
 				Value:   8888,
 				Usage:   "Port number",
 			},
+			&cli.IntFlag{
+				Name:  "threshold",
+				Value: 15,
+				Usage: "Ignore those who contributed less than `LINES`",
+			},
 		},
 		Action: func(c *cli.Context) error {
 			config := Config{}
@@ -290,6 +314,7 @@ func main() {
 				config.Root = root
 			}
 			config.Listen = fmt.Sprintf(":%d", c.Int("port"))
+			config.Threshold = c.Int("threshold")
 
 			configError := verifyConfig(&config)
 			if configError != nil {
