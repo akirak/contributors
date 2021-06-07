@@ -45,6 +45,14 @@ func verifyConfig(config *Config) error {
 	return nil
 }
 
+func stripDomain(email string) (string, error) {
+	re, reError := regexp.Compile("^.+@")
+	if reError != nil {
+		return email, reError
+	}
+	return re.FindString(email), nil
+}
+
 type RepoContents map[string][]string
 
 func runLinguist(root string) (RepoContents, error) {
@@ -237,8 +245,9 @@ func runApp(config Config) error {
 			fmt.Fprintln(w, "<tbody>")
 			for j := range stat.Contributions {
 				c := stat.Contributions[j]
+				identity, _ := stripDomain(c.Email)
 				fmt.Fprint(w, "<tr>")
-				fmt.Fprintf(w, "<td>%s</td>", c.Email)
+				fmt.Fprintf(w, "<td>%s</td>", identity)
 				fmt.Fprintf(w, "<td>%.1f%%</td>", c.Percentage)
 				fmt.Fprintln(w, "</tr>")
 			}
