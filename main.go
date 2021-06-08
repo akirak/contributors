@@ -18,6 +18,7 @@ import (
 )
 
 type Config struct {
+	Name      string
 	Root      string
 	Listen    string
 	Threshold int
@@ -176,10 +177,19 @@ func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	return result, nil
 }
 
+func formatPercent(percent float64) string {
+	if percent < 10 {
+		return fmt.Sprintf("%.2f", percent)
+	} else {
+		return fmt.Sprintf("%.1f", percent)
+	}
+}
+
 func handleHome(config Config, stats []LanguageStat, w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, "<title>Contributors on %s</title>\n", config.Root)
-	fmt.Fprintf(w, "<h1>Contributors on %s</h1>\n", config.Root)
+	title := fmt.Sprintf("Contributions to %s", config.Name)
+	fmt.Fprintf(w, "<title>%s</title>\n", title)
+	fmt.Fprintf(w, "<h1>%s</h1>\n", title)
 
 	fmt.Fprintln(w, "<h2>Profile</h2>")
 
@@ -200,7 +210,7 @@ func handleHome(config Config, stats []LanguageStat, w http.ResponseWriter) {
 		fmt.Fprintf(w, "<td>%s</td>", stat.Language)
 		fmt.Fprintf(w, "<td>%d</td>", stat.TotalLines)
 		percentage := float64(stat.TotalLines) / float64(totalLines) * 100
-		fmt.Fprintf(w, "<td>%.2f%%</td>", percentage)
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
 		fmt.Fprintln(w, "</tr>")
 	}
 	fmt.Fprintln(w, "</tbody>")
@@ -232,27 +242,28 @@ func handleHome(config Config, stats []LanguageStat, w http.ResponseWriter) {
 		fmt.Fprintln(w, "<tbody>")
 		var remainingPercentage float64 = 100
 		var remainingContributors int = 0
+		numContributors := len(stat.Contributions)
 		for j := range stat.Contributions {
 			c := stat.Contributions[j]
 			identity, _ := stripDomain(c.Email)
 			percentage := c.Percentage
 			nlines := c.Nlines
-			if nlines < config.Threshold {
-				remainingContributors = len(stat.Contributions) - j
+			if nlines < config.Threshold && j < numContributors-1 {
+				remainingContributors = numContributors - j
 				break
 			}
 			remainingPercentage -= percentage
 			fmt.Fprint(w, "<tr>")
-			fmt.Fprintf(w, "<td>%s</td>", identity)
+			fmt.Fprintf(w, "<td><span title=\"%s\">%s</span></td>", c.Email, identity)
 			fmt.Fprintf(w, "<td>%d</td>", nlines)
-			fmt.Fprintf(w, "<td>%.1f%%</td>", percentage)
+			fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
 			fmt.Fprintln(w, "</tr>")
 		}
 		if remainingContributors > 0 {
 			fmt.Fprint(w, "<tr>")
 			fmt.Fprintf(w, "<td>%d others</td>", remainingContributors)
 			fmt.Fprint(w, "<td>-</td>")
-			fmt.Fprintf(w, "<td>%.1f%%</td>", remainingPercentage)
+			fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(remainingPercentage))
 			fmt.Fprintln(w, "</tr>")
 		}
 		fmt.Fprintln(w, "</tbody>")
@@ -318,6 +329,8 @@ func main() {
 			}
 			config.Listen = fmt.Sprintf(":%d", c.Int("port"))
 			config.Threshold = c.Int("threshold")
+			_, name := path.Split(config.Root)
+			config.Name = name
 
 			configError := verifyConfig(&config)
 			if configError != nil {
