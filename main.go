@@ -216,6 +216,76 @@ func languageProfile(result *Result, w http.ResponseWriter) {
 	fmt.Fprintln(w, "</table>")
 }
 
+func peopleProfile(result *Result, w http.ResponseWriter) {
+	m := make(map[string]int)
+
+	stats := result.LanguageStats
+	var totalLines int
+	totalLines = 0
+	for i := range stats {
+		totalLines += stats[i].TotalLines
+		contributions := stats[i].Contributions
+		for j := range contributions {
+			contribution := contributions[j]
+			author := contribution.Email
+			nlines := contribution.Nlines
+			n, ok := m[author]
+			if !ok {
+				m[author] = nlines
+			} else {
+				m[author] = n + nlines
+			}
+		}
+	}
+
+	var contributions []Contribution
+	for email, nlines := range m {
+		contributions = append(contributions, Contribution{
+			Email:      email,
+			Nlines:     nlines,
+			Percentage: float64(nlines) / float64(totalLines) * 100,
+		})
+	}
+	sort.Sort(Contributions(contributions))
+
+	fmt.Fprintln(w, "<table>")
+	fmt.Fprintln(w, "<thead><tr>")
+	fmt.Fprint(w, "<th>Person</th>")
+	fmt.Fprint(w, "<th># lines</th>")
+	fmt.Fprint(w, "<th>%</th>")
+	fmt.Fprint(w, "</tr>")
+	fmt.Fprintln(w, "<tbody>")
+	var remainingPercentage float64 = 100
+	var remainingContributors int = 0
+	numContributors := len(contributions)
+	for i := range contributions {
+		c := contributions[i]
+		identity, _ := stripDomain(c.Email)
+		percentage := c.Percentage
+		nlines := c.Nlines
+		// TODO: Make this threshold customizable
+		if nlines < 50 && i < numContributors-1 {
+			remainingContributors = numContributors - i
+			break
+		}
+		remainingPercentage -= percentage
+		fmt.Fprint(w, "<tr>")
+		fmt.Fprintf(w, "<td><span title=\"%s\">%s</span></td>", c.Email, identity)
+		fmt.Fprintf(w, "<td>%d</td>", nlines)
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
+		fmt.Fprintln(w, "</tr>")
+	}
+	if remainingContributors > 0 {
+		fmt.Fprint(w, "<tr>")
+		fmt.Fprintf(w, "<td>%d others</td>", remainingContributors)
+		fmt.Fprint(w, "<td>-</td>")
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(remainingPercentage))
+		fmt.Fprintln(w, "</tr>")
+	}
+	fmt.Fprintln(w, "</tbody>")
+	fmt.Fprintln(w, "</table>")
+}
+
 func languageStat(config Config, stat LanguageStat, w http.ResponseWriter) {
 	fmt.Fprintf(w, "<h3>%s</h3>\n", stat.Language)
 
@@ -276,8 +346,10 @@ func handleHome(config Config, result *Result, w http.ResponseWriter) {
 	fmt.Fprintf(w, "<title>%s</title>\n", title)
 	fmt.Fprintf(w, "<h1>%s</h1>\n", title)
 
-	fmt.Fprintln(w, "<h2>Profile</h2>")
+	fmt.Fprintln(w, "<h2>Languages</h2>")
 	languageProfile(result, w)
+	fmt.Fprintln(w, "<h2>People</h2>")
+	peopleProfile(result, w)
 
 	fmt.Fprintln(w, "<h2>Contributions by language</h2>")
 	for i := range stats {
@@ -286,7 +358,6 @@ func handleHome(config Config, result *Result, w http.ResponseWriter) {
 }
 
 func serve(config Config, result *Result) error {
-
 	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		handleHome(config, result, w)
 	})
