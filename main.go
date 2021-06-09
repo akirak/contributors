@@ -264,7 +264,7 @@ func peopleProfile(result *Result, w http.ResponseWriter) {
 		percentage := c.Percentage
 		nlines := c.Nlines
 		// TODO: Make this threshold customizable
-		if nlines < 50 && i < numContributors-1 {
+		if nlines < 50 && percentage < 10 && i < numContributors-1 {
 			remainingContributors = numContributors - i
 			break
 		}
