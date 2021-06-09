@@ -158,6 +158,11 @@ func getContributions(root string, files []string) ([]Contribution, int, error) 
 	return result, totalLines, nil
 }
 
+type Result struct {
+	Contents      RepoContents
+	LanguageStats []LanguageStat
+}
+
 func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
 	var result []LanguageStat
 
@@ -185,14 +190,8 @@ func formatPercent(percent float64) string {
 	}
 }
 
-func handleHome(config Config, stats []LanguageStat, w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	title := fmt.Sprintf("Contributions to %s", config.Name)
-	fmt.Fprintf(w, "<title>%s</title>\n", title)
-	fmt.Fprintf(w, "<h1>%s</h1>\n", title)
-
-	fmt.Fprintln(w, "<h2>Profile</h2>")
-
+func languageProfile(result *Result, w http.ResponseWriter) {
+	stats := result.LanguageStats
 	fmt.Fprintln(w, "<table>")
 	fmt.Fprintln(w, "<thead><tr>")
 	fmt.Fprint(w, "<th>Language</th>")
@@ -215,60 +214,86 @@ func handleHome(config Config, stats []LanguageStat, w http.ResponseWriter) {
 	}
 	fmt.Fprintln(w, "</tbody>")
 	fmt.Fprintln(w, "</table>")
+}
+
+func languageStat(config Config, stat LanguageStat, w http.ResponseWriter) {
+	fmt.Fprintf(w, "<h3>%s</h3>\n", stat.Language)
+
+	fmt.Fprintln(w, "<details>")
+	fmt.Fprintln(w, "<summary>Files</summary>")
+	fmt.Fprintln(w, "<ul>")
+	for j := range stat.Files {
+		fmt.Fprintf(w, "<li>%s</li>", stat.Files[j])
+	}
+	fmt.Fprintln(w, "</ul>")
+	fmt.Fprintln(w, "</details>")
+
+	fmt.Fprintln(w, "<table>")
+	fmt.Fprintln(w, "<caption>Contributors</caption>")
+	fmt.Fprintln(w, "<thead>")
+	fmt.Fprintln(w, "<tr>")
+	fmt.Fprintln(w, "<th>E-mail</th>")
+	fmt.Fprintln(w, "<th>Lines</th>")
+	fmt.Fprintln(w, "<th>Percent</th>")
+	fmt.Fprintln(w, "</tr>")
+	fmt.Fprintln(w, "</thead>")
+	fmt.Fprintln(w, "<tbody>")
+	var remainingPercentage float64 = 100
+	var remainingContributors int = 0
+	numContributors := len(stat.Contributions)
+	for j := range stat.Contributions {
+		c := stat.Contributions[j]
+		identity, _ := stripDomain(c.Email)
+		percentage := c.Percentage
+		nlines := c.Nlines
+		if nlines < config.Threshold && j < numContributors-1 {
+			remainingContributors = numContributors - j
+			break
+		}
+		remainingPercentage -= percentage
+		fmt.Fprint(w, "<tr>")
+		fmt.Fprintf(w, "<td><span title=\"%s\">%s</span></td>", c.Email, identity)
+		fmt.Fprintf(w, "<td>%d</td>", nlines)
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
+		fmt.Fprintln(w, "</tr>")
+	}
+	if remainingContributors > 0 {
+		fmt.Fprint(w, "<tr>")
+		fmt.Fprintf(w, "<td>%d others</td>", remainingContributors)
+		fmt.Fprint(w, "<td>-</td>")
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(remainingPercentage))
+		fmt.Fprintln(w, "</tr>")
+	}
+	fmt.Fprintln(w, "</tbody>")
+	fmt.Fprintln(w, "</table>")
+
+}
+
+func handleHome(config Config, result *Result, w http.ResponseWriter) {
+	stats := result.LanguageStats
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	title := fmt.Sprintf("Contributions to %s", config.Name)
+	fmt.Fprintf(w, "<title>%s</title>\n", title)
+	fmt.Fprintf(w, "<h1>%s</h1>\n", title)
+
+	fmt.Fprintln(w, "<h2>Profile</h2>")
+	languageProfile(result, w)
 
 	fmt.Fprintln(w, "<h2>Contributions by language</h2>")
 	for i := range stats {
-		stat := stats[i]
-		fmt.Fprintf(w, "<h3>%s</h3>\n", stat.Language)
-
-		fmt.Fprintln(w, "<details>")
-		fmt.Fprintln(w, "<summary>Files</summary>")
-		fmt.Fprintln(w, "<ul>")
-		for j := range stat.Files {
-			fmt.Fprintf(w, "<li>%s</li>", stat.Files[j])
-		}
-		fmt.Fprintln(w, "</ul>")
-		fmt.Fprintln(w, "</details>")
-
-		fmt.Fprintln(w, "<table>")
-		fmt.Fprintln(w, "<caption>Contributors</caption>")
-		fmt.Fprintln(w, "<thead>")
-		fmt.Fprintln(w, "<tr>")
-		fmt.Fprintln(w, "<th>E-mail</th>")
-		fmt.Fprintln(w, "<th>Lines</th>")
-		fmt.Fprintln(w, "<th>Percent</th>")
-		fmt.Fprintln(w, "</tr>")
-		fmt.Fprintln(w, "</thead>")
-		fmt.Fprintln(w, "<tbody>")
-		var remainingPercentage float64 = 100
-		var remainingContributors int = 0
-		numContributors := len(stat.Contributions)
-		for j := range stat.Contributions {
-			c := stat.Contributions[j]
-			identity, _ := stripDomain(c.Email)
-			percentage := c.Percentage
-			nlines := c.Nlines
-			if nlines < config.Threshold && j < numContributors-1 {
-				remainingContributors = numContributors - j
-				break
-			}
-			remainingPercentage -= percentage
-			fmt.Fprint(w, "<tr>")
-			fmt.Fprintf(w, "<td><span title=\"%s\">%s</span></td>", c.Email, identity)
-			fmt.Fprintf(w, "<td>%d</td>", nlines)
-			fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
-			fmt.Fprintln(w, "</tr>")
-		}
-		if remainingContributors > 0 {
-			fmt.Fprint(w, "<tr>")
-			fmt.Fprintf(w, "<td>%d others</td>", remainingContributors)
-			fmt.Fprint(w, "<td>-</td>")
-			fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(remainingPercentage))
-			fmt.Fprintln(w, "</tr>")
-		}
-		fmt.Fprintln(w, "</tbody>")
-		fmt.Fprintln(w, "</table>")
+		languageStat(config, stats[i], w)
 	}
+}
+
+func serve(config Config, result *Result) error {
+
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		handleHome(config, result, w)
+	})
+
+	fmt.Printf("Listening on %s...\n", config.Listen)
+
+	return http.ListenAndServe(config.Listen, nil)
 }
 
 func runApp(config Config) error {
@@ -286,13 +311,12 @@ func runApp(config Config) error {
 		return fmt.Errorf("Error: %v", statsError)
 	}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
-		handleHome(config, stats, w)
-	})
+	result := &Result{
+		Contents:      contents,
+		LanguageStats: stats,
+	}
 
-	fmt.Printf("Listening on %s...\n", config.Listen)
-
-	return http.ListenAndServe(config.Listen, nil)
+	return serve(config, result)
 }
 
 func main() {
