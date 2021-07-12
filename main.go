@@ -163,10 +163,10 @@ type Result struct {
 	LanguageStats []LanguageStat
 }
 
-func getStats(root string, contents RepoContents) ([]LanguageStat, error) {
+func getStats(root string, contents *RepoContents) ([]LanguageStat, error) {
 	var result []LanguageStat
 
-	for language, files := range contents {
+	for language, files := range *contents {
 		contributions, totalLines, err := getContributions(root, files)
 		if err != nil {
 			return nil, fmt.Errorf("Error while analysing %s: %v", language, err)
@@ -286,7 +286,7 @@ func peopleProfile(result *Result, w http.ResponseWriter) {
 	fmt.Fprintln(w, "</table>")
 }
 
-func languageStat(config Config, stat LanguageStat, w http.ResponseWriter) {
+func languageStat(config *Config, stat *LanguageStat, w http.ResponseWriter) {
 	fmt.Fprintf(w, "<h3>%s</h3>\n", stat.Language)
 
 	fmt.Fprintln(w, "<details>")
@@ -339,7 +339,7 @@ func languageStat(config Config, stat LanguageStat, w http.ResponseWriter) {
 
 }
 
-func handleHome(config Config, result *Result, w http.ResponseWriter) {
+func handleHome(config *Config, result *Result, w http.ResponseWriter) {
 	stats := result.LanguageStats
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	title := fmt.Sprintf("Contributions to %s", config.Name)
@@ -353,11 +353,11 @@ func handleHome(config Config, result *Result, w http.ResponseWriter) {
 
 	fmt.Fprintln(w, "<h2>Contributions by language</h2>")
 	for i := range stats {
-		languageStat(config, stats[i], w)
+		languageStat(config, &stats[i], w)
 	}
 }
 
-func serve(config Config, result *Result) error {
+func serve(config *Config, result *Result) error {
 	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		handleHome(config, result, w)
 	})
@@ -367,7 +367,7 @@ func serve(config Config, result *Result) error {
 	return http.ListenAndServe(config.Listen, nil)
 }
 
-func runApp(config Config) error {
+func runApp(config *Config) error {
 	fmt.Printf("Analysing the repository %s...\n", config.Root)
 
 	contents, linguistError := runLinguist(config.Root)
@@ -376,7 +376,7 @@ func runApp(config Config) error {
 		return fmt.Errorf("Error: %v", linguistError)
 	}
 
-	stats, statsError := getStats(config.Root, contents)
+	stats, statsError := getStats(config.Root, &contents)
 
 	if statsError != nil {
 		return fmt.Errorf("Error: %v", statsError)
@@ -432,7 +432,7 @@ func main() {
 				return configError
 			}
 
-			return runApp(config)
+			return runApp(&config)
 		},
 	}
 
