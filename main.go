@@ -239,6 +239,9 @@ func getStats(root string, contents *RepoContents) ([]LanguageStat, error) {
 
 	for language, unfilteredFiles := range *contents {
 		files, filterErr := excludeWithGlob(ignorePatterns, unfilteredFiles)
+		if len(files) == 0 {
+			continue
+		}
 		if filterErr != nil {
 			return nil, filterErr
 		}
