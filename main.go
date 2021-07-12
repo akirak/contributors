@@ -270,7 +270,8 @@ func languageProfile(result *Result, w http.ResponseWriter) {
 	fmt.Fprintln(w, "<table>")
 	fmt.Fprintln(w, "<thead><tr>")
 	fmt.Fprint(w, "<th>Language</th>")
-	fmt.Fprint(w, "<th># of lines</th>")
+	fmt.Fprint(w, "<th>Files</th>")
+	fmt.Fprint(w, "<th>Lines</th>")
 	fmt.Fprint(w, "<th>Percentage</th>")
 	fmt.Fprint(w, "</tr>")
 	fmt.Fprintln(w, "<tbody>")
@@ -282,6 +283,7 @@ func languageProfile(result *Result, w http.ResponseWriter) {
 		stat := stats[i]
 		fmt.Fprintf(w, "<tr>")
 		fmt.Fprintf(w, "<td>%s</td>", stat.Language)
+		fmt.Fprintf(w, "<td>%d</td>", len(stat.Files))
 		fmt.Fprintf(w, "<td>%d</td>", stat.TotalLines)
 		percentage := float64(stat.TotalLines) / float64(totalLines) * 100
 		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
