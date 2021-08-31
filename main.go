@@ -56,10 +56,16 @@ func stripDomain(email string) (string, error) {
 	return re.FindString(email), nil
 }
 
-type RepoContents map[string][]string
+type LanguageData struct {
+	Size       int
+	Percentage string
+	Files      []string
+}
+
+type RepoContents map[string]LanguageData
 
 func runLinguist(root string) (RepoContents, error) {
-	cmd := exec.Command("linguist", root, "--json")
+	cmd := exec.Command("linguist", root, "--json", "--breakdown")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -237,8 +243,8 @@ func getStats(root string, contents *RepoContents) ([]LanguageStat, error) {
 		return nil, fmt.Errorf("Error from the ignore file: %v", ignoreFileErr)
 	}
 
-	for language, unfilteredFiles := range *contents {
-		files, filterErr := excludeWithGlob(ignorePatterns, unfilteredFiles)
+	for language, data := range *contents {
+		files, filterErr := excludeWithGlob(ignorePatterns, data.Files)
 		if len(files) == 0 {
 			continue
 		}
