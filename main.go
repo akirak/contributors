@@ -64,8 +64,28 @@ type LanguageData struct {
 
 type RepoContents map[string]LanguageData
 
+func findLinguist() (string, error) {
+	path, err := exec.LookPath("github-linguist")
+	if err == nil {
+		return path, err
+	}
+
+	path2, err2 := exec.LookPath("linguist")
+	if err2 != nil {
+		return path2, err2
+	}
+
+	return path2, nil
+}
+
 func runLinguist(root string) (RepoContents, error) {
-	cmd := exec.Command("linguist", root, "--json", "--breakdown")
+	linguistBin, linguistErr := findLinguist()
+
+	if linguistErr != nil {
+		return nil, errors.New("Cannot find linguist")
+	}
+
+	cmd := exec.Command(linguistBin, root, "--json", "--breakdown")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
