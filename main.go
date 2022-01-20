@@ -288,6 +288,14 @@ func formatPercent(percent float64) string {
 	}
 }
 
+func percentage(value int, total int) float64 {
+	if value == total {
+		return 100.0
+	} else {
+		return float64(value) / float64(total) * 100
+	}
+}
+
 func languageProfile(result *Result, w http.ResponseWriter) {
 	stats := result.LanguageStats
 	fmt.Fprintln(w, "<table>")
@@ -308,8 +316,7 @@ func languageProfile(result *Result, w http.ResponseWriter) {
 		fmt.Fprintf(w, "<td>%s</td>", stat.Language)
 		fmt.Fprintf(w, "<td>%d</td>", len(stat.Files))
 		fmt.Fprintf(w, "<td>%d</td>", stat.TotalLines)
-		percentage := float64(stat.TotalLines) / float64(totalLines) * 100
-		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage))
+		fmt.Fprintf(w, "<td>%s%%</td>", formatPercent(percentage(stat.TotalLines, totalLines)))
 		fmt.Fprintln(w, "</tr>")
 	}
 	fmt.Fprintln(w, "</tbody>")
@@ -343,7 +350,7 @@ func peopleProfile(result *Result, w http.ResponseWriter) {
 		contributions = append(contributions, Contribution{
 			Email:      email,
 			Nlines:     nlines,
-			Percentage: float64(nlines) / float64(totalLines) * 100,
+			Percentage: percentage(nlines, totalLines),
 		})
 	}
 	sort.Sort(Contributions(contributions))
