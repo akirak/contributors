@@ -14,7 +14,6 @@ import (
 	"regexp"
 	"sort"
 
-	"github.com/bmatcuk/doublestar"
 	"github.com/urfave/cli/v2"
 )
 
@@ -126,70 +125,6 @@ func (a LanguageStats) Len() int           { return len(a) }
 func (a LanguageStats) Less(i, j int) bool { return a[i].TotalLines > a[j].TotalLines }
 func (a LanguageStats) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 
-type GlobPattern = string
-
-func getIgnoreSettings(root string) ([]GlobPattern, error) {
-	ignoreFile := path.Join(root, ".contribignore")
-	_, statErr := os.Stat(ignoreFile)
-	if statErr != nil {
-		if errors.Is(statErr, os.ErrNotExist) {
-			var result []string
-			return result, nil
-		}
-		return nil, statErr
-	}
-	file, fileErr := os.Open(ignoreFile)
-	if fileErr != nil {
-		return nil, fileErr
-	}
-
-	re, reErr := regexp.Compile(`^(\s*#|\s+$)`)
-	if reErr != nil {
-		return nil, reErr
-	}
-
-	scanner := bufio.NewScanner(file)
-	var result []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !re.MatchString(line) {
-			result = append(result, line)
-		}
-	}
-
-	scannerErr := scanner.Err()
-	if scannerErr != nil {
-		return nil, fmt.Errorf("Error from scanner: %v", scannerErr)
-	}
-
-	return result, nil
-}
-
-func excludeWithGlob(ignorePatterns []string, files []string) ([]string, error) {
-	var result []string
-
-	for i := range files {
-		file := files[i]
-		var ignored bool = false
-		for j := range ignorePatterns {
-			x, matchErr := doublestar.Match(ignorePatterns[j], file)
-			if matchErr != nil {
-				return nil, fmt.Errorf("Error while matching %s on %s: %v",
-					ignorePatterns[j], file,
-					matchErr)
-			}
-			if x {
-				ignored = true
-				break
-			}
-		}
-		if !ignored {
-			result = append(result, file)
-		}
-	}
-	return result, nil
-}
-
 func getContributions(root string, files []string) ([]Contribution, int, error) {
 	re, reErr := regexp.Compile(`^author-mail <(.+)>`)
 	if reErr != nil {
@@ -257,12 +192,6 @@ type Result struct {
 
 func getStats(root string, contents *RepoContents) ([]LanguageStat, error) {
 	var result []LanguageStat
-
-	ignorePatterns, ignoreFileErr := getIgnoreSettings(root)
-	if ignoreFileErr != nil {
-		return nil, fmt.Errorf("Error from the ignore file: %v", ignoreFileErr)
-	}
-
 	for language, data := range *contents {
 		files := data.Files
 		contributions, totalLines, err := getContributions(root, files)
