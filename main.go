@@ -264,13 +264,7 @@ func getStats(root string, contents *RepoContents) ([]LanguageStat, error) {
 	}
 
 	for language, data := range *contents {
-		files, filterErr := excludeWithGlob(ignorePatterns, data.Files)
-		if len(files) == 0 {
-			continue
-		}
-		if filterErr != nil {
-			return nil, filterErr
-		}
+		files := data.Files
 		contributions, totalLines, err := getContributions(root, files)
 		if err != nil {
 			return nil, fmt.Errorf("Error while analysing %s: %v", language, err)
